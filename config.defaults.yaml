@@ -1,0 +1,31 @@
+wandb:
+  project: scope
+  # Get your W&B token at https://wandb.ai/authorize
+  token:
+kowalski:
+  host: gloria.caltech.edu
+  port: 443
+  protocol: https
+  token:
+  collections:
+    alerts: ZTF_alerts
+fritz:
+  token:
+  protocol: https
+  host: fritz.science
+
+training:
+  classes:
+    acai_h:
+      # value of label should refer to dataset.dN.csv
+      label: h
+      conv_branch: true
+      # value should refer to features section of this config
+      features: 20201130
+      # balance ratio for the prevalent class. leave null to use all available data
+      balance:
+      weight_per_class: true
+    acai_b:
+    acai_o:
+    acai_n:
+    acai_v:
