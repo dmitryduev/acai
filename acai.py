@@ -3,9 +3,11 @@ from contextlib import contextmanager
 import datetime
 from deepdiff import DeepDiff
 import fire
-import numpy as np
+
+# import numpy as np
 import os
-import pandas as pd
+
+# import pandas as pd
 import pathlib
 from penquins import Kowalski
 from pprint import pprint
@@ -365,8 +367,8 @@ class Scope:
 
         :return:
         """
-        import uuid
-        import shutil
+        # import uuid
+        # import shutil
 
         # # create a mock dataset and check that the training pipeline works
         # dataset = f"{uuid.uuid4().hex}.csv"
