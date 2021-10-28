@@ -166,7 +166,6 @@ class Scope:
         :param kwargs: refer to utils.DNN.setup and utils.Dataset.make
         :return:
         """
-
         import tensorflow as tf
 
         if gpu is not None:
@@ -181,13 +180,13 @@ class Scope:
         from wandb.keras import WandbCallback
 
         from acai.nn import DNN
-        from acai.utils import Dataset
+        from acai.utils import DataSet
 
         train_config = self.config["training"]["classes"][tag]
 
         features = self.config["features"][train_config["features"]]
 
-        ds = Dataset(
+        ds = DataSet(
             tag=tag,
             path_dataset=path_dataset,
             features=features,
@@ -351,7 +350,9 @@ class Scope:
                 wandb.run.summary["dropped_samples_f1"] = 2 * p * r / (p + r)
 
         if save:
-            output_path = str(pathlib.Path(__file__).parent.absolute() / "models" / tag)
+            output_path = str(
+                pathlib.Path(__file__).parent.absolute() / "pretrained_models" / tag
+            )
             if verbose:
                 print(f"Saving model to {output_path}")
             classifier.save(
@@ -414,7 +415,7 @@ class Scope:
         #         test=True,
         #     )
         #     path_model = (
-        #         pathlib.Path(__file__).parent.absolute() / "models" / tag / time_tag
+        #         pathlib.Path(__file__).parent.absolute() / "pretrained_models" / tag / time_tag
         #     )
         #     shutil.rmtree(path_model)
         # finally:

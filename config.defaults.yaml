@@ -1,9 +1,9 @@
 wandb:
-  project: scope
+  project: acai
   # Get your W&B token at https://wandb.ai/authorize
   token:
 kowalski:
-  host: gloria.caltech.edu
+  host: kowalski.caltech.edu
   port: 443
   protocol: https
   token:
@@ -13,6 +13,59 @@ fritz:
   token:
   protocol: https
   host: fritz.science
+
+features:
+  "20201130":
+    - drb:
+        norm: 1
+    - diffmaglim:
+        norm: 1
+    - ra:
+        norm: 1
+    - dec:
+        norm: 1
+    - magpsf:
+        norm: 1
+    - sigmapsf:
+        norm: 1
+    - chipsf:
+        norm: 1
+    - fwhm:
+        norm: 1
+    - sky:
+        norm: 1
+    - chinr:
+        norm: 1
+    - sharpnr:
+        norm: 1
+    - sgscore1:
+        norm: 1
+    - distpsnr1:
+        norm: 1
+    - sgscore2:
+        norm: 1
+    - distpsnr2:
+        norm: 1
+    - sgscore3:
+        norm: 1
+    - distpsnr3:
+        norm: 1
+    - ndethist:
+        norm: 1
+    - ncovhist:
+        norm: 1
+    - scorr:
+        norm: 1
+    - nmtchps:
+        norm: 1
+    - clrcoeff:
+        norm: 1
+    - clrcounc:
+        norm: 1
+    - neargaia:
+        norm: 1
+    - neargaiabright:
+        norm: 1
 
 training:
   classes:
