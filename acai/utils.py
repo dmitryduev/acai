@@ -25,7 +25,7 @@ import yaml
 
 
 braai = tf.keras.models.load_model(
-    pathlib.Path(__file__).parent / "models/braai/braai_d6_m9.h5"
+    pathlib.Path(__file__).parent.parent / "models/braai/braai_d6_m9.h5"
 )
 
 
