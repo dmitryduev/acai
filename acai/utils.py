@@ -5,6 +5,7 @@ __all__ = [
     "load_config",
     "log",
     "time_stamp",
+    "threshold",
 ]
 
 
@@ -54,6 +55,12 @@ def forgiving_true(expression):
     return True if expression in ("t", "True", "true", "1", 1, True) else False
 
 
+def threshold(a, t: float = 0.5):
+    b = np.zeros_like(a, dtype=np.int64)
+    b[np.array(a) > t] = 1
+    return b
+
+
 class DataSample:
     def __init__(self, alert: dict, label: Optional[str] = None, **kwargs):
         self.kwargs = kwargs
@@ -79,7 +86,10 @@ class DataSample:
 
     @staticmethod
     def make_triplet(
-        alert: dict, normalize: bool = True, to_tpu: bool = False
+        alert: dict,
+        normalize: bool = True,
+        nan_to_median: bool = False,
+        to_tpu: bool = False,
     ) -> np.array:
         """
         Feed in alert packet
@@ -95,8 +105,19 @@ class DataSample:
             with gzip.open(io.BytesIO(cutout_data), "rb") as f:
                 with fits.open(io.BytesIO(f.read()), ignore_missing_simple=True) as hdu:
                     data = hdu[0].data
-                    # replace nans with zeros
-                    cutout_dict[cutout] = np.nan_to_num(data)
+                    # replace nans with zeros by default or with median if requested
+                    if nan_to_median:
+                        img = np.array(data)
+                        # replace dubiously large values
+                        xl = np.greater(np.abs(img), 1e20, where=~np.isnan(img))
+                        if img[xl].any():
+                            img[xl] = np.nan
+                        if np.isnan(img).any():
+                            median = float(np.nanmean(img.flatten()))
+                            img = np.nan_to_num(img, nan=median)
+                        cutout_dict[cutout] = img
+                    else:
+                        cutout_dict[cutout] = np.nan_to_num(data)
                     # normalize
                     if normalize:
                         cutout_dict[cutout] /= np.linalg.norm(cutout_dict[cutout])
@@ -108,7 +129,9 @@ class DataSample:
                     cutout_dict[cutout],
                     [(0, 63 - shape[0]), (0, 63 - shape[1])],
                     mode="constant",
-                    constant_values=1e-9,
+                    constant_values=1e-9
+                    if not nan_to_median
+                    else float(np.nanmean(cutout_dict[cutout].flatten())),
                 )
 
         triplet = np.zeros((63, 63, 3))
@@ -170,7 +193,7 @@ class DataSet:
         self.feature_names = list(features.keys())
         self.feature_norms = features
 
-        self.features, self.triplets = None, None
+        self.features, self.triplets, self.meta = None, None, None
 
         if self.verbose:
             print("Labels:")
@@ -185,6 +208,7 @@ class DataSet:
         """
         features = []
         triplets = []
+        meta = []
 
         entries = (
             tqdm(labels.itertuples(), total=len(labels))
@@ -202,11 +226,20 @@ class DataSet:
                 )
                 features.append(data_sample.data.get("features"))
                 triplets.append(data_sample.data.get("triplet"))
+                meta.append(
+                    {
+                        "oid": alert["objectId"],
+                        "candid": alert["candid"],
+                        "ra": alert["candidate"]["ra"],
+                        "dec": alert["candidate"]["dec"],
+                    }
+                )
 
         features = np.array(features)
         triplets = np.array(triplets)
+        meta = np.array(meta)
 
-        return features, triplets
+        return features, triplets, meta
 
     def make(
         self,
@@ -295,7 +328,7 @@ class DataSet:
             self.features = np.load(path_features)
             self.triplets = np.load(path_triplets)
         else:
-            self.features, self.triplets = self.load_data(self.labels)
+            self.features, self.triplets, self.meta = self.load_data(self.labels)
         # self.features = np.zeros((total, len(self.feature_names), 1))
         # self.triplets = np.zeros((total, 63, 63, 3))
 
@@ -306,30 +339,30 @@ class DataSet:
                     "features": self.features[train_indexes],
                     "triplets": self.triplets[train_indexes],
                 },
-                # self.target[train_indexes],
                 np.array(self.target[train_indexes], dtype=np.float64),
             )
         )
+        train_meta = self.meta[train_indexes]
         val_dataset = tf.data.Dataset.from_tensor_slices(
             (
                 {
                     "features": self.features[val_indexes],
                     "triplets": self.triplets[val_indexes],
                 },
-                # self.target[val_indexes],
                 np.array(self.target[val_indexes], dtype=np.float64),
             )
         )
+        val_meta = self.meta[val_indexes]
         test_dataset = tf.data.Dataset.from_tensor_slices(
             (
                 {
                     "features": self.features[test_indexes],
                     "triplets": self.triplets[test_indexes],
                 },
-                # self.target[test_indexes],
                 np.array(self.target[test_indexes], dtype=np.float64),
             )
         )
+        test_meta = self.meta[test_indexes]
         dropped_samples = (
             tf.data.Dataset.from_tensor_slices(
                 (
@@ -337,13 +370,13 @@ class DataSet:
                         "features": self.features[index_dropped],
                         "triplets": self.triplets[index_dropped],
                     },
-                    # self.target[index_dropped],
                     np.array(self.target[index_dropped], dtype=np.float64),
                 )
             )
             if balance
             else None
         )
+        dropped_meta = self.meta[train_indexes] if balance else None
 
         # Shuffle and batch the datasets:
         train_dataset = (
@@ -368,6 +401,13 @@ class DataSet:
             "dropped_samples": np.array(index_dropped.to_list())
             if index_dropped is not None
             else None,
+        }
+
+        metadata = {
+            "train": train_meta,
+            "val": val_meta,
+            "test": test_meta,
+            "dropped_samples": dropped_meta,
         }
 
         # How many steps per epoch?
@@ -409,4 +449,4 @@ class DataSet:
             # working with binary classifiers only
             class_weight = {i: 1 for i in range(2)}
 
-        return datasets, indexes, steps_per_epoch, class_weight
+        return datasets, metadata, indexes, steps_per_epoch, class_weight

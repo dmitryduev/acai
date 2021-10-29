@@ -1,23 +1,30 @@
 #!/usr/bin/env python
+import matplotlib.pyplot as plt
+from astropy.visualization import (
+    AsymmetricPercentileInterval,
+    ImageNormalize,
+    LinearStretch,
+    LogStretch,
+)
 from contextlib import contextmanager
 import datetime
 from deepdiff import DeepDiff
 import fire
-
-# import numpy as np
+import json
+import numpy as np
 import os
-
-# import pandas as pd
+import pandas as pd
 import pathlib
 from penquins import Kowalski
 from pprint import pprint
+import random
 import questionary
 import subprocess
 import sys
 from typing import Optional, Sequence, Union
 import yaml
 
-from acai.utils import forgiving_true, load_config, log
+from acai.utils import DataSample, forgiving_true, load_config, log, threshold
 
 
 @contextmanager
@@ -200,7 +207,7 @@ class Scope:
         label = train_config["label"]
 
         # values from kwargs override those defined in config. if latter is absent, use reasonable default
-        threshold = kwargs.get("threshold", train_config.get("threshold", 0.5))
+        thrshold = kwargs.get("threshold", train_config.get("threshold", 0.5))
         balance = kwargs.get("balance", train_config.get("balance", None))
         weight_per_class = kwargs.get(
             "weight_per_class", train_config.get("weight_per_class", False)
@@ -223,9 +230,9 @@ class Scope:
         path_features: Optional[Union[str, pathlib.Path]] = kwargs.get("path_features")
         path_triplets: Optional[Union[str, pathlib.Path]] = kwargs.get("path_triplets")
 
-        datasets, indexes, steps_per_epoch, class_weight = ds.make(
+        datasets, metadata, indexes, steps_per_epoch, class_weight = ds.make(
             target_label=label,
-            threshold=threshold,
+            threshold=thrshold,
             balance=balance,
             weight_per_class=weight_per_class,
             scale_features=scale_features,
@@ -318,6 +325,91 @@ class Scope:
             verbose=verbose,
         )
 
+        if not kwargs.get("test", False):
+            # log some examples
+            test_array = list(datasets["test"].unbatch().as_numpy_iterator())
+            test_features, test_triplets, test_labels = [], [], []
+            import tqdm
+
+            for item in tqdm.tqdm(test_array):
+                test_features.append(np.expand_dims(item[0]["features"], axis=[0, -1]))
+                test_triplets.append(np.expand_dims(item[0]["triplets"], axis=[0]))
+                test_labels.append(int(item[1]))
+
+            test_features = np.vstack(test_features)
+            test_triplets = np.vstack(test_triplets)
+
+            preds = classifier.model.predict([test_features, test_triplets]).flatten()
+            preds_int = threshold(preds, t=thrshold)
+            df_test = pd.DataFrame.from_records(
+                [
+                    {
+                        "label": test_label,
+                        "pred": pred,
+                        "pred_int": pred_int,
+                        "misclassification": test_label ^ pred_int,
+                        **meta,
+                    }
+                    for test_label, pred, pred_int, meta in zip(
+                        test_labels, preds, preds_int, metadata["test"]
+                    )
+                ]
+            )
+
+            # log correct predictions
+            # correct confident positive predictions:
+            mask = (
+                (df_test["misclassification"] == 0)
+                & (df_test["label"] == 1)
+                & (df_test["pred"] > 0.9)
+            )
+            df_test_masked = df_test.loc[mask].sample(n=5)
+
+            normalizer = AsymmetricPercentileInterval(
+                lower_percentile=1, upper_percentile=100
+            )
+            fig = plt.figure(figsize=(11, 4), dpi=150)
+
+            for ni, sample in enumerate(df_test_masked.itertuples()):
+                print(sample)
+                path_alert = pathlib.Path(path_data) / f"{sample.candid}.json"
+                if not path_alert.exists():
+                    continue
+                with open(path_alert, "r") as f:
+                    alert = json.load(f)
+
+                triplet = DataSample.make_triplet(
+                    alert=alert, normalize=False, nan_to_median=True
+                )
+                # plot image triplets vertically
+                # science & reference
+                for i in range(2):
+                    image = triplet[:, :, i]
+                    ax = fig.add_subplot(
+                        3, len(df_test_masked), ni + 1 + i * len(df_test_masked)
+                    )
+                    ax.set_axis_off()
+                    image_norm = ImageNormalize(image, stretch=LogStretch())(image)
+                    vmin, vmax = normalizer.get_limits(image_norm)
+                    ax.imshow(
+                        image_norm, cmap="bone", origin="lower", vmin=vmin, vmax=vmax
+                    )
+                # difference
+                image = triplet[:, :, 2]
+                ax = fig.add_subplot(
+                    3, len(df_test_masked), ni + 1 + 2 * len(df_test_masked)
+                )
+                ax.set_axis_off()
+                image_norm = ImageNormalize(image, stretch=LinearStretch())(image)
+                vmin, vmax = normalizer.get_limits(image_norm)
+                ax.imshow(image_norm, cmap="bone", origin="lower", vmin=vmin, vmax=vmax)
+                ax.set_title(sample.oid, y=-0.35, fontsize=10)
+
+            fig.subplots_adjust(wspace=0.05, hspace=0.25)
+            fig.suptitle("Correct confident positive predictions", fontsize=14)
+
+            wandb.log({"examples": wandb.Image(fig)})
+
         if verbose:
             print("Evaluating on test set:")
         stats = classifier.evaluate(datasets["test"], verbose=verbose)
@@ -357,7 +449,9 @@ class Scope:
                     wandb.run.summary["dropped_samples_precision"],
                     wandb.run.summary["dropped_samples_recall"],
                 )
-                wandb.run.summary["dropped_samples_f1"] = 2 * p * r / (p + r)
+                wandb.run.summary["dropped_samples_f1"] = (
+                    2 * p * r / (p + r) if p + r != 0 else "undefined"
+                )
 
         if save:
             output_path = str(pathlib.Path(__file__).parent.absolute() / "models" / tag)
@@ -376,14 +470,11 @@ class Scope:
 
         :return:
         """
-        import numpy as np
-        import pandas as pd
-        import random
         import shutil
         import string
         import uuid
 
-        # create a mock dataset and check that the training pipeline works
+        # create a mock dataset and check that the training pipeline finishes
         labels = f"{uuid.uuid4().hex}.csv"
 
         path_mock = pathlib.Path(__file__).parent.absolute() / "data" / "mock"
