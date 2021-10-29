@@ -20,7 +20,7 @@ import pathlib
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
 from tqdm import tqdm
-from typing import Union
+from typing import Optional, Sequence, Union
 import yaml
 
 
@@ -29,7 +29,7 @@ braai = tf.keras.models.load_model(
 )
 
 
-def load_config(config_path: Union[str, pathlib.Path]):
+def load_config(config_path: Union[str, pathlib.Path]) -> dict:
     """
     Load config and secrets
     """
@@ -39,7 +39,7 @@ def load_config(config_path: Union[str, pathlib.Path]):
     return config
 
 
-def time_stamp():
+def time_stamp() -> str:
     """
     :return: UTC time as a formatted string
     """
@@ -55,7 +55,7 @@ def forgiving_true(expression):
 
 
 class DataSample:
-    def __init__(self, alert, label=None, **kwargs):
+    def __init__(self, alert: dict, label: Optional[str] = None, **kwargs):
         self.kwargs = kwargs
 
         self.label = label
@@ -78,7 +78,9 @@ class DataSample:
         }
 
     @staticmethod
-    def make_triplet(alert, normalize: bool = True, to_tpu: bool = False):
+    def make_triplet(
+        alert: dict, normalize: bool = True, to_tpu: bool = False
+    ) -> np.array:
         """
         Feed in alert packet
         """
@@ -91,7 +93,7 @@ class DataSample:
 
             # unzip
             with gzip.open(io.BytesIO(cutout_data), "rb") as f:
-                with fits.open(io.BytesIO(f.read())) as hdu:
+                with fits.open(io.BytesIO(f.read()), ignore_missing_simple=True) as hdu:
                     data = hdu[0].data
                     # replace nans with zeros
                     cutout_dict[cutout] = np.nan_to_num(data)
@@ -120,7 +122,12 @@ class DataSample:
 
         return triplet
 
-    def make_features(self, alert, feature_names=None, norms=None):
+    def make_features(
+        self,
+        alert: dict,
+        feature_names: Sequence[str] = tuple(),
+        norms: Optional[dict] = None,
+    ) -> np.array:
         features = []
         for feature_name in feature_names:
             feature = alert["candidate"].get(feature_name)
@@ -143,36 +150,9 @@ class DataSet:
     def __init__(
         self,
         tag: str,
+        features: dict,
         path_labels: str,
-        path_labels_add: str = None,
         path_data: str = "./",
-        feature_names=(
-            "drb",
-            "diffmaglim",
-            "ra",
-            "dec",
-            "magpsf",
-            "sigmapsf",
-            "chipsf",
-            "fwhm",
-            "sky",
-            "chinr",
-            "sharpnr",
-            "sgscore1",
-            "distpsnr1",
-            "sgscore2",
-            "distpsnr2",
-            "sgscore3",
-            "distpsnr3",
-            "ndethist",
-            "ncovhist",
-            "scorr",
-            "nmtchps",
-            "clrcoeff",
-            "clrcounc",
-            "neargaia",
-            "neargaiabright",
-        ),
         verbose: bool = False,
         **kwargs,
     ):
@@ -181,31 +161,22 @@ class DataSet:
 
         self.path_data = pathlib.Path(path_data)
         self.path_labels = pathlib.Path(path_labels)
-        self.path_labels_add = (
-            pathlib.Path(path_labels_add) if path_labels_add is not None else None
-        )
 
         self.labels = pd.read_csv(self.path_labels)
-        self.labels_add = (
-            pd.read_csv(self.path_labels_add) if path_labels_add is not None else None
-        )
 
         self.target = None
         self.target_label = None
 
-        self.feature_names = feature_names
-        self.feature_norms = {feature: 1.0 for feature in self.feature_names}
+        self.feature_names = list(features.keys())
+        self.feature_norms = features
 
         self.features, self.triplets = None, None
 
         if self.verbose:
             print("Labels:")
             print(self.labels)
-            if path_labels_add is not None:
-                print("Additional labels:")
-                print(self.labels_add)
 
-    def load_data(self, labels, **kwargs):
+    def load_data(self, labels: pd.DataFrame, **kwargs):
         """Parse alert json files into features and image triplets
 
         :param labels:
@@ -240,14 +211,11 @@ class DataSet:
     def make(
         self,
         target_label: str = "h",
-        balance=None,
+        balance: Optional[Union[int, float]] = None,
         weight_per_class: bool = True,
         test_size: float = 0.1,
         val_size: float = 0.1,
         random_state: int = 42,
-        path_norms=None,
-        path_features=None,
-        path_triplets=None,
         batch_size: int = 256,
         shuffle_buffer_size: int = 256,
         epochs: int = 300,
@@ -255,15 +223,11 @@ class DataSet:
     ):
         """Make datasets for target_label
         :param target_label: corresponds to training.classes.<label> in config
-        :param threshold: our labels are floats [0, 0.25, 0.5, 0.75, 1]
         :param balance: balance ratio for the prevalent class. if null - use all available data
         :param weight_per_class:
-        :param scale_features: min_max | median_std
         :param test_size:
         :param val_size:
         :param random_state: set this for reproducibility
-        :param feature_stats: feature_stats to use to standardize features.
-                              if None, stats are computed from the data, taking balance into account
         :param batch_size
         :param shuffle_buffer_size
         :param epochs
@@ -301,7 +265,7 @@ class DataSet:
                         set(self.labels.loc[mask_negative].index) - set(index_negative)
                     )
                 ].index
-            else:
+            elif pos < neg:
                 index_positive = (
                     self.labels.loc[mask_positive]
                     .sample(n=sample_size, random_state=1)
@@ -325,10 +289,8 @@ class DataSet:
         )
 
         # load and normalize data
-        if path_norms is not None:
-            with open(path_norms) as f:
-                self.feature_norms = yaml.load(f, Loader=yaml.FullLoader)
-
+        path_features: Optional[Union[str, pathlib.Path]] = kwargs.get("path_features")
+        path_triplets: Optional[Union[str, pathlib.Path]] = kwargs.get("path_triplets")
         if path_features is not None and path_triplets is not None:
             self.features = np.load(path_features)
             self.triplets = np.load(path_triplets)
@@ -336,33 +298,6 @@ class DataSet:
             self.features, self.triplets = self.load_data(self.labels)
         # self.features = np.zeros((total, len(self.feature_names), 1))
         # self.triplets = np.zeros((total, 63, 63, 3))
-
-        # extend dataset with additional data that is guaranteed to be used in training
-        # helpful in active learning
-        if self.labels_add is not None:
-            features_add, triplets_add = self.load_data(self.labels_add)
-            total_add = features_add.shape[0]
-            train_indexes_add, test_indexes_add = train_test_split(
-                list(range(total, total + total_add)),
-                shuffle=True,
-                test_size=test_size,
-                random_state=random_state,
-            )
-            train_indexes_add, val_indexes_add = train_test_split(
-                train_indexes_add,
-                shuffle=True,
-                test_size=val_size,
-                random_state=random_state,
-            )
-            self.features = np.concatenate((self.features, features_add), axis=0)
-            self.triplets = np.concatenate((self.triplets, triplets_add), axis=0)
-            train_indexes += train_indexes_add
-            val_indexes += val_indexes_add
-            test_indexes += test_indexes_add
-
-            mask_positive_add = self.labels_add.label == target_label
-            target_add = np.expand_dims(mask_positive_add, axis=1)
-            self.target = np.concatenate((self.target, target_add), axis=0)
 
         # make tf.data.Dataset's:
         train_dataset = tf.data.Dataset.from_tensor_slices(
@@ -411,7 +346,6 @@ class DataSet:
         )
 
         # Shuffle and batch the datasets:
-
         train_dataset = (
             train_dataset.shuffle(shuffle_buffer_size).batch(batch_size).repeat(epochs)
         )
@@ -437,7 +371,6 @@ class DataSet:
         }
 
         # How many steps per epoch?
-
         steps_per_epoch_train = len(train_indexes) // batch_size - 1
         steps_per_epoch_val = len(val_indexes) // batch_size - 1
         steps_per_epoch_test = len(test_indexes) // batch_size - 1

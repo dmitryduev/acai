@@ -230,16 +230,18 @@ class DNN(AbstractClassifier):
         self.model = tf.keras.models.load_model(path_model, **kwargs)
 
     def save(self, output_path="./", output_format="hdf5", tag=None):
+        import pathlib
 
-        if output_format not in ("SavedModel", "hdf5"):
+        if output_format not in ("tf", "hdf5"):
             raise ValueError("unknown output format")
 
         output_name = self.name if not tag else f"{self.name}.{tag}"
 
-        if (output_path != "./") and (not os.path.exists(output_path)):
-            os.makedirs(output_path)
+        path = pathlib.Path(output_path)
+        if not path.exists():
+            path.mkdir(parents=True, exist_ok=True)
 
-        if output_format == "SavedModel":
-            self.model.save(os.path.join(output_path, output_name))
+        if output_format == "tf":
+            self.model.save_weights(path / tag / output_name, save_format="tf")
         elif output_format == "hdf5":
-            self.model.save(os.path.join(output_path, f"{output_name}.h5"))
+            self.model.save(path / tag / f"{output_name}.h5")

@@ -152,7 +152,8 @@ class Scope:
     def train(
         self,
         tag: str,
-        path_dataset: Union[str, pathlib.Path],
+        path_labels: str,
+        path_data: str,
         gpu: Optional[int] = None,
         verbose: bool = False,
         **kwargs,
@@ -160,7 +161,8 @@ class Scope:
         """Train classifier
 
         :param tag: classifier designation, refers to "class" in config.taxonomy
-        :param path_dataset: local path to csv file with the dataset
+        :param path_labels: local path to csv file with the labels
+        :param path_data: local path to alert json files
         :param gpu: GPU id to use, zero-based. check tf.config.list_physical_devices('GPU') for available devices
         :param verbose:
         :param kwargs: refer to utils.DNN.setup and utils.Dataset.make
@@ -188,7 +190,8 @@ class Scope:
 
         ds = DataSet(
             tag=tag,
-            path_dataset=path_dataset,
+            path_labels=path_labels,
+            path_data=path_data,
             features=features,
             verbose=verbose,
             **kwargs,
@@ -206,14 +209,19 @@ class Scope:
 
         test_size = kwargs.get("test_size", train_config.get("test_size", 0.1))
         val_size = kwargs.get("val_size", train_config.get("val_size", 0.1))
-        random_state = kwargs.get("random_state", train_config.get("random_state", 42))
+        random_state: int = kwargs.get(
+            "random_state", train_config.get("random_state", 42)
+        )
         feature_stats = self.config.get("feature_stats", None)
 
-        batch_size = kwargs.get("batch_size", train_config.get("batch_size", 64))
-        shuffle_buffer_size = kwargs.get(
-            "shuffle_buffer_size", train_config.get("shuffle_buffer_size", 512)
+        batch_size: int = kwargs.get("batch_size", train_config.get("batch_size", 32))
+        shuffle_buffer_size: int = kwargs.get(
+            "shuffle_buffer_size", train_config.get("shuffle_buffer_size", 128)
         )
-        epochs = kwargs.get("epochs", train_config.get("epochs", 100))
+        epochs: int = kwargs.get("epochs", train_config.get("epochs", 100))
+
+        path_features: Optional[Union[str, pathlib.Path]] = kwargs.get("path_features")
+        path_triplets: Optional[Union[str, pathlib.Path]] = kwargs.get("path_triplets")
 
         datasets, indexes, steps_per_epoch, class_weight = ds.make(
             target_label=label,
@@ -228,6 +236,8 @@ class Scope:
             batch_size=batch_size,
             shuffle_buffer_size=shuffle_buffer_size,
             epochs=epochs,
+            path_features=path_features,
+            path_triplets=path_triplets,
         )
 
         # set up and train model
@@ -241,7 +251,7 @@ class Scope:
         patience = int(kwargs.get("patience", 20))
         callbacks = kwargs.get("callbacks", ("reduce_lr_on_plateau", "early_stopping"))
         run_eagerly = kwargs.get("run_eagerly", False)
-        pre_trained_model = kwargs.get("pre_trained_model")
+        pretrained_model = kwargs.get("pretrained_model")
         save = kwargs.get("save", False)
 
         # parse boolean args
@@ -256,7 +266,7 @@ class Scope:
             dense_branch=dense_branch,
             features_input_shape=(len(features),),
             conv_branch=conv_branch,
-            dmdt_input_shape=(26, 26, 1),
+            triplet_shape=(63, 63, 3),
             loss=loss,
             optimizer=optimizer,
             learning_rate=lr,
@@ -270,8 +280,8 @@ class Scope:
         if verbose:
             print(classifier.model.summary())
 
-        if pre_trained_model is not None:
-            classifier.load(pre_trained_model)
+        if pretrained_model is not None:
+            classifier.load(pretrained_model)
 
         time_tag = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
@@ -284,14 +294,14 @@ class Scope:
                 config={
                     "tag": tag,
                     "label": label,
-                    "dataset": pathlib.Path(path_dataset).name,
+                    "dataset": pathlib.Path(path_labels).name,
                     "scale_features": scale_features,
                     "learning_rate": lr,
                     "epochs": epochs,
                     "patience": patience,
                     "random_state": random_state,
                     "batch_size": batch_size,
-                    "architecture": "scope-net",
+                    "architecture": "acai-net",
                     "dense_branch": dense_branch,
                     "conv_branch": conv_branch,
                 },
@@ -350,14 +360,12 @@ class Scope:
                 wandb.run.summary["dropped_samples_f1"] = 2 * p * r / (p + r)
 
         if save:
-            output_path = str(
-                pathlib.Path(__file__).parent.absolute() / "pretrained_models" / tag
-            )
+            output_path = str(pathlib.Path(__file__).parent.absolute() / "models" / tag)
             if verbose:
                 print(f"Saving model to {output_path}")
             classifier.save(
                 output_path=output_path,
-                output_format="tf",
+                output_format="hdf5",
                 tag=time_tag,
             )
 
@@ -368,59 +376,63 @@ class Scope:
 
         :return:
         """
-        # import uuid
-        # import shutil
+        import numpy as np
+        import pandas as pd
+        import random
+        import shutil
+        import string
+        import uuid
 
-        # # create a mock dataset and check that the training pipeline works
-        # dataset = f"{uuid.uuid4().hex}.csv"
-        # path_mock = pathlib.Path(__file__).parent.absolute() / "data" / "training"
-        #
-        # try:
-        #     if not path_mock.exists():
-        #         path_mock.mkdir(parents=True, exist_ok=True)
-        #
-        #     feature_names = self.config["features"]["ontological"]
-        #     class_names = [
-        #         self.config["training"]["classes"][class_name]["label"]
-        #         for class_name in self.config["training"]["classes"]
-        #     ]
-        #
-        #     entries = []
-        #     for i in range(1000):
-        #         entry = {
-        #             **{
-        #                 feature_name: np.random.normal(0, 0.1)
-        #                 for feature_name in feature_names
-        #             },
-        #             **{
-        #                 class_name: np.random.choice([0, 1])
-        #                 for class_name in class_names
-        #             },
-        #             **{"non-variable": np.random.choice([0, 1])},
-        #             **{"dmdt": np.abs(np.random.random((26, 26))).tolist()},
-        #         }
-        #         entries.append(entry)
-        #
-        #     df_mock = pd.DataFrame.from_records(entries)
-        #     df_mock.to_csv(path_mock / dataset, index=False)
-        #
-        #     tag = "h"
-        #     time_tag = self.train(
-        #         tag=tag,
-        #         path_dataset=path_mock / dataset,
-        #         batch_size=32,
-        #         epochs=3,
-        #         verbose=True,
-        #         save=True,
-        #         test=True,
-        #     )
-        #     path_model = (
-        #         pathlib.Path(__file__).parent.absolute() / "pretrained_models" / tag / time_tag
-        #     )
-        #     shutil.rmtree(path_model)
-        # finally:
-        #     # clean up after thyself
-        #     (path_mock / dataset).unlink()
+        # create a mock dataset and check that the training pipeline works
+        labels = f"{uuid.uuid4().hex}.csv"
+
+        path_mock = pathlib.Path(__file__).parent.absolute() / "data" / "mock"
+        path_features = path_mock / f"{uuid.uuid4().hex}.npy"
+        path_triplets = path_mock / f"{uuid.uuid4().hex}.npy"
+
+        try:
+            if not path_mock.exists():
+                path_mock.mkdir(parents=True, exist_ok=True)
+
+            n_samples = 2000
+
+            np.save(str(path_features), np.random.random((n_samples, 25)))
+            np.save(str(path_triplets), np.random.random((n_samples, 63, 63, 3)))
+
+            entries = []
+            for i in range(n_samples):
+                entry = dict(
+                    oid=f"ZTF87{''.join(random.choices(string.ascii_lowercase, k=7))}",
+                    candid=random.randint(600000000000000000, 1600000000000000000),
+                    label=random.choice(("h", "o", "n", "b", "v")),
+                )
+                entries.append(entry)
+
+            df_mock = pd.DataFrame.from_records(entries)
+            df_mock.to_csv(path_mock / labels, index=False)
+
+            tag = "acai_h"
+            time_tag = self.train(
+                tag=tag,
+                path_labels=str(path_mock / labels),
+                path_data=str(path_mock / "alerts"),
+                path_features=path_features,
+                path_triplets=path_triplets,
+                batch_size=16,
+                epochs=3,
+                verbose=True,
+                save=True,
+                test=True,
+            )
+            path_model = (
+                pathlib.Path(__file__).parent.absolute() / "models" / tag / time_tag
+            )
+            shutil.rmtree(path_model)
+        finally:
+            # clean up after thyself
+            (path_mock / labels).unlink()
+            path_features.unlink()
+            path_triplets.unlink()
 
 
 if __name__ == "__main__":

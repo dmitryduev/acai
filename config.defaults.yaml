@@ -16,69 +16,90 @@ fritz:
 
 features:
   "20201130":
-    - drb:
-        norm: 1
-    - diffmaglim:
-        norm: 1
-    - ra:
-        norm: 1
-    - dec:
-        norm: 1
-    - magpsf:
-        norm: 1
-    - sigmapsf:
-        norm: 1
-    - chipsf:
-        norm: 1
-    - fwhm:
-        norm: 1
-    - sky:
-        norm: 1
-    - chinr:
-        norm: 1
-    - sharpnr:
-        norm: 1
-    - sgscore1:
-        norm: 1
-    - distpsnr1:
-        norm: 1
-    - sgscore2:
-        norm: 1
-    - distpsnr2:
-        norm: 1
-    - sgscore3:
-        norm: 1
-    - distpsnr3:
-        norm: 1
-    - ndethist:
-        norm: 1
-    - ncovhist:
-        norm: 1
-    - scorr:
-        norm: 1
-    - nmtchps:
-        norm: 1
-    - clrcoeff:
-        norm: 1
-    - clrcounc:
-        norm: 1
-    - neargaia:
-        norm: 1
-    - neargaiabright:
-        norm: 1
+    drb:
+      norm: 1
+    diffmaglim:
+      norm: 1
+    ra:
+      norm: 1
+    dec:
+      norm: 1
+    magpsf:
+      norm: 1
+    sigmapsf:
+      norm: 1
+    chipsf:
+      norm: 1
+    fwhm:
+      norm: 1
+    sky:
+      norm: 1
+    chinr:
+      norm: 1
+    sharpnr:
+      norm: 1
+    sgscore1:
+      norm: 1
+    distpsnr1:
+      norm: 1
+    sgscore2:
+      norm: 1
+    distpsnr2:
+      norm: 1
+    sgscore3:
+      norm: 1
+    distpsnr3:
+      norm: 1
+    ndethist:
+      norm: 1
+    ncovhist:
+      norm: 1
+    scorr:
+      norm: 1
+    nmtchps:
+      norm: 1
+    clrcoeff:
+      norm: 1
+    clrcounc:
+      norm: 1
+    neargaia:
+      norm: 1
+    neargaiabright:
+      norm: 1
 
 training:
   classes:
     acai_h:
       # value of label should refer to dataset.dN.csv
-      label: h
+      label: "h"
       conv_branch: true
       # value should refer to features section of this config
-      features: 20201130
+      features: "20201130"
       # balance ratio for the prevalent class. leave null to use all available data
-      balance:
-      weight_per_class: true
+      balance: 2.5
+      # balance: 1.1
+      weight_per_class: false
     acai_b:
+      label: "b"
+      features: "20201130"
+      balance: 2.5
+      # balance: 1.1
+      weight_per_class: false
     acai_o:
+      label: "o"
+      features: "20201130"
+      balance: 2.5
+      # balance: 1.1
+      weight_per_class: false
     acai_n:
+      label: "n"
+      features: "20201130"
+      balance: 2.5
+      # balance: 1.1
+      weight_per_class: false
     acai_v:
+      label: "v"
+      features: "20201130"
+      balance: 2.5
+      # balance: 1.1
+      weight_per_class: false
