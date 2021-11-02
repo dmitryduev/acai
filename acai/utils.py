@@ -342,7 +342,7 @@ class DataSet:
                 np.array(self.target[train_indexes], dtype=np.float64),
             )
         )
-        train_meta = self.meta[train_indexes]
+        train_meta = self.meta[train_indexes] if self.meta is not None else None
         val_dataset = tf.data.Dataset.from_tensor_slices(
             (
                 {
@@ -352,7 +352,7 @@ class DataSet:
                 np.array(self.target[val_indexes], dtype=np.float64),
             )
         )
-        val_meta = self.meta[val_indexes]
+        val_meta = self.meta[val_indexes] if self.meta is not None else None
         test_dataset = tf.data.Dataset.from_tensor_slices(
             (
                 {
@@ -362,7 +362,7 @@ class DataSet:
                 np.array(self.target[test_indexes], dtype=np.float64),
             )
         )
-        test_meta = self.meta[test_indexes]
+        test_meta = self.meta[test_indexes] if self.meta is not None else None
         dropped_samples = (
             tf.data.Dataset.from_tensor_slices(
                 (
@@ -376,7 +376,9 @@ class DataSet:
             if balance
             else None
         )
-        dropped_meta = self.meta[train_indexes] if balance else None
+        dropped_meta = (
+            self.meta[train_indexes] if balance and (self.meta is not None) else None
+        )
 
         # Shuffle and batch the datasets:
         train_dataset = (
