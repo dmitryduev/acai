@@ -11,6 +11,7 @@ import datetime
 from deepdiff import DeepDiff
 import fire
 import json
+import io
 import numpy as np
 import os
 import pandas as pd
@@ -22,6 +23,7 @@ import questionary
 import subprocess
 import sys
 from typing import Optional, Sequence, Union
+import tqdm
 import yaml
 
 from acai.utils import DataSample, forgiving_true, load_config, log, threshold
@@ -155,6 +157,48 @@ class Scope:
             p = subprocess.run(command, check=True)
             if p.returncode != 0:
                 raise RuntimeError("Failed to fetch ACAI datasets")
+
+    @staticmethod
+    def alert_images(path_data: str, candid: int) -> dict:
+        normalizer = AsymmetricPercentileInterval(
+            lower_percentile=1, upper_percentile=100
+        )
+
+        images = {"science": None, "reference": None, "difference": None}
+
+        path_alert = pathlib.Path(path_data) / f"{candid}.json"
+        if not path_alert.exists():
+            return images
+
+        with open(path_alert, "r") as f:
+            alert = json.load(f)
+
+        triplet = DataSample.make_triplet(
+            alert=alert, normalize=False, nan_to_median=True
+        )
+
+        for i, img_tag in enumerate(("science", "reference", "difference")):
+            image = triplet[:, :, i]
+
+            buff = io.BytesIO()
+            plt.close("all")
+            fig = plt.figure()
+            fig.set_size_inches(2, 2, forward=False)
+            ax = plt.Axes(fig, [0.0, 0.0, 1.0, 1.0])
+            ax.set_axis_off()
+            fig.add_axes(ax)
+
+            stretcher = LinearStretch() if img_tag == "difference" else LogStretch()
+
+            image_norm = ImageNormalize(image, stretch=stretcher)(image)
+            vmin, vmax = normalizer.get_limits(image_norm)
+            ax.imshow(image_norm, cmap="bone", origin="lower", vmin=vmin, vmax=vmax)
+            fig.savefig(buff, dpi=42)
+            # buff.seek(0)
+            # plt.close("all")
+            images[img_tag] = fig
+
+        return images
 
     def train(
         self,
@@ -326,10 +370,9 @@ class Scope:
         )
 
         if not kwargs.get("test", False):
-            # log some examples
+            # log some example
             test_array = list(datasets["test"].unbatch().as_numpy_iterator())
             test_features, test_triplets, test_labels = [], [], []
-            import tqdm
 
             for item in tqdm.tqdm(test_array):
                 test_features.append(np.expand_dims(item[0]["features"], axis=[0, -1]))
@@ -340,6 +383,7 @@ class Scope:
             test_triplets = np.vstack(test_triplets)
 
             preds = classifier.model.predict([test_features, test_triplets]).flatten()
+            # apply threshold to float predictions
             preds_int = threshold(preds, t=thrshold)
             df_test = pd.DataFrame.from_records(
                 [
@@ -347,68 +391,35 @@ class Scope:
                         "label": test_label,
                         "pred": pred,
                         "pred_int": pred_int,
-                        "misclassification": test_label ^ pred_int,
-                        **meta,
+                        "miss": bool(test_label ^ pred_int),
+                        **{
+                            key: value if key != "candid" else str(value)
+                            for key, value in meta.items()
+                        },
+                        **{
+                            key: wandb.Image(fig)
+                            for key, fig in self.alert_images(
+                                path_data=path_data, candid=meta["candid"]
+                            ).items()
+                            if fig is not None
+                        },
                     }
                     for test_label, pred, pred_int, meta in zip(
                         test_labels, preds, preds_int, metadata["test"]
                     )
                 ]
             )
+            print(df_test)
 
-            # log correct predictions
             # correct confident positive predictions:
-            mask = (
-                (df_test["misclassification"] == 0)
-                & (df_test["label"] == 1)
-                & (df_test["pred"] > 0.9)
-            )
-            df_test_masked = df_test.loc[mask].sample(n=5)
+            # mask = (
+            #     (df_test["miss"] == 0)
+            #     & (df_test["label"] == 1)
+            #     & (df_test["pred"] > 0.9)
+            # )
+            # df_test_masked = df_test.loc[mask].sample(n=5)
 
-            normalizer = AsymmetricPercentileInterval(
-                lower_percentile=1, upper_percentile=100
-            )
-            fig = plt.figure(figsize=(11, 4), dpi=150)
-
-            for ni, sample in enumerate(df_test_masked.itertuples()):
-                print(sample)
-                path_alert = pathlib.Path(path_data) / f"{sample.candid}.json"
-                if not path_alert.exists():
-                    continue
-                with open(path_alert, "r") as f:
-                    alert = json.load(f)
-
-                triplet = DataSample.make_triplet(
-                    alert=alert, normalize=False, nan_to_median=True
-                )
-                # plot image triplets vertically
-                # science & reference
-                for i in range(2):
-                    image = triplet[:, :, i]
-                    ax = fig.add_subplot(
-                        3, len(df_test_masked), ni + 1 + i * len(df_test_masked)
-                    )
-                    ax.set_axis_off()
-                    image_norm = ImageNormalize(image, stretch=LogStretch())(image)
-                    vmin, vmax = normalizer.get_limits(image_norm)
-                    ax.imshow(
-                        image_norm, cmap="bone", origin="lower", vmin=vmin, vmax=vmax
-                    )
-                # difference
-                image = triplet[:, :, 2]
-                ax = fig.add_subplot(
-                    3, len(df_test_masked), ni + 1 + 2 * len(df_test_masked)
-                )
-                ax.set_axis_off()
-                image_norm = ImageNormalize(image, stretch=LinearStretch())(image)
-                vmin, vmax = normalizer.get_limits(image_norm)
-                ax.imshow(image_norm, cmap="bone", origin="lower", vmin=vmin, vmax=vmax)
-                ax.set_title(sample.oid, y=-0.35, fontsize=10)
-
-            fig.subplots_adjust(wspace=0.05, hspace=0.25)
-            fig.suptitle("Correct confident positive predictions", fontsize=14)
-
-            wandb.log({"examples": wandb.Image(fig)})
+            wandb.log({"Test set": wandb.Table(dataframe=df_test)})
 
         if verbose:
             print("Evaluating on test set:")
