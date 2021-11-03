@@ -11,8 +11,9 @@ __all__ = [
 
 import datetime
 import os
-
 import tensorflow as tf
+from typing import Tuple
+
 
 from .models import AbstractClassifier
 
@@ -43,6 +44,7 @@ class DNN(AbstractClassifier):
             triplet_shape=triplet_shape,
             dense_branch=dense_branch,
             conv_branch=conv_branch,
+            **kwargs,
         )
 
         self.meta["loss"] = loss
@@ -129,63 +131,103 @@ class DNN(AbstractClassifier):
         )
 
     @staticmethod
-    def build_model(
-        dense_branch: bool = True,
-        conv_branch: bool = True,
-        **kwargs,
-    ):
-        if (not dense_branch) and (not conv_branch):
+    def build_model(**kwargs):
+        def dense_block(
+            x,
+            units: int = 64,
+            # scale_factor: Union[int, float] = 0.5,
+            activation: str = "relu",
+            dropout_rate: float = 0.25,
+        ):
+            x = tf.keras.layers.Dense(units, activation=activation)(x)
+            x = tf.keras.layers.Dropout(dropout_rate)(x)
+            # x = tf.keras.layers.Dense(int(front_units * scale_factor), activation=activation)(x)
+            return x
+
+        def conv_block(
+            x,
+            conv_layer_type: str = "SeparableConv2D",
+            pool_layer_type: str = "MaxPooling2D",
+            filters: int = 16,
+            filter_size: Tuple[int, int] = (3, 3),
+            activation: str = "relu",
+            pool_size: Tuple[int, int] = (2, 2),
+            dropout_rate: float = 0.25,
+        ):
+            conv_layer = getattr(tf.keras.layers, conv_layer_type)
+            pool_layer = getattr(tf.keras.layers, pool_layer_type)
+            x = conv_layer(filters, filter_size, activation=activation)(x)
+            x = conv_layer(filters, filter_size, activation=activation)(x)
+            x = pool_layer(pool_size=pool_size)(x)
+            x = tf.keras.layers.Dropout(dropout_rate)(x)
+            return x
+
+        num_dense_blocks = kwargs.get("dense_blocks", 1)
+        num_conv_blocks = kwargs.get("conv_blocks", 2)
+        num_head_blocks = kwargs.get("head_blocks", 1)
+
+        if num_dense_blocks == 0 and num_conv_blocks == 0:
             raise ValueError("model must have at least one branch")
 
         features_input = tf.keras.Input(
-            shape=kwargs.get("features_shape", (40,)), name="features"
+            shape=kwargs.get("features_shape", (25,)), name="features"
         )
         triplet_input = tf.keras.Input(
-            shape=kwargs.get("triplet_shape", (26, 26, 1)), name="triplets"
+            shape=kwargs.get("triplet_shape", (63, 63, 3)), name="triplets"
         )
 
         # dense branch to digest features
-        if dense_branch:
-            x_dense = tf.keras.layers.Dense(64, activation="relu", name="dense_fc_1")(
-                features_input
-            )
-            x_dense = tf.keras.layers.Dropout(0.25)(x_dense)
-            x_dense = tf.keras.layers.Dense(32, activation="relu", name="dense_fc_2")(
-                x_dense
-            )
+        if num_dense_blocks > 0:
+            x_dense = features_input
+            dense_block_scale_factor = kwargs.get("dense_block_scale_factor", 0.5)
+            for i in range(num_dense_blocks):
+                x_dense = dense_block(
+                    x=x_dense,
+                    units=kwargs.get("dense_block_units", 32)
+                    * (dense_block_scale_factor ** i),
+                    activation=kwargs.get("dense_activation", "relu"),
+                    dropout_rate=kwargs.get("dense_dropout_rate", 0.25),
+                )
 
         # CNN branch to digest image cutouts
-        if conv_branch:
-            x_conv = tf.keras.layers.SeparableConv2D(
-                16, (3, 3), activation="relu", name="conv_conv_1"
-            )(triplet_input)
-            x_conv = tf.keras.layers.SeparableConv2D(
-                16, (3, 3), activation="relu", name="conv_conv_2"
-            )(x_conv)
-            x_conv = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x_conv)
-            x_conv = tf.keras.layers.Dropout(0.25)(x_conv)
-
-            x_conv = tf.keras.layers.SeparableConv2D(
-                32, (3, 3), activation="relu", name="conv_conv_3"
-            )(x_conv)
-            x_conv = tf.keras.layers.SeparableConv2D(
-                32, (3, 3), activation="relu", name="conv_conv_4"
-            )(x_conv)
-            x_conv = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(x_conv)
-            x_conv = tf.keras.layers.Dropout(0.25)(x_conv)
+        if num_conv_blocks > 0:
+            x_conv = triplet_input
+            conv_block_scale_factor = kwargs.get("conv_block_scale_factor", 2)
+            for i in range(num_conv_blocks):
+                x_conv = conv_block(
+                    x=x_conv,
+                    conv_layer_type=kwargs.get(
+                        "conv_conv_layer_type", "SeparableConv2D"
+                    ),
+                    pool_layer_type=kwargs.get("conv_pool_layer_type", "MaxPooling2D"),
+                    filters=kwargs.get("conv_block_filters", 16)
+                    * (conv_block_scale_factor ** i),
+                    filter_size=kwargs.get("conv_block_filter_size", (3, 3)),
+                    activation=kwargs.get("conv_activation", "relu"),
+                    pool_size=kwargs.get("conv_block_pool_size", (2, 2)),
+                    dropout_rate=kwargs.get("conv_dropout_rate", 0.25),
+                )
 
             x_conv = tf.keras.layers.GlobalAveragePooling2D()(x_conv)
 
         # concatenate
-        if dense_branch and conv_branch:
+        if num_dense_blocks and num_conv_blocks:
             x = tf.keras.layers.concatenate([x_dense, x_conv])
-        elif dense_branch:
+        elif num_dense_blocks:
             x = x_dense
-        elif conv_branch:
+        elif num_conv_blocks:
             x = x_conv
 
-        # one more dense layer?
-        x = tf.keras.layers.Dense(16, activation="relu", name="fc_1")(x)
+        # dense head
+        head_block_scale_factor = kwargs.get("head_block_scale_factor", 1)
+        for i in range(num_head_blocks):
+            x = dense_block(
+                x=x,
+                units=kwargs.get("head_block_units", 16)
+                * (head_block_scale_factor ** i),
+                activation=kwargs.get("head_activation", "relu"),
+                dropout_rate=kwargs.get("head_dropout_rate", 0),
+            )
 
         # Logistic regression to output the final score
         x = tf.keras.layers.Dense(1, activation="sigmoid", name="score")(x)

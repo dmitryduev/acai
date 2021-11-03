@@ -31,9 +31,7 @@ braai = tf.keras.models.load_model(
 
 
 def load_config(config_path: Union[str, pathlib.Path]) -> dict:
-    """
-    Load config and secrets
-    """
+    """Load config and secrets"""
     with open(config_path) as config_yaml:
         config = yaml.load(config_yaml, Loader=yaml.FullLoader)
 
@@ -41,21 +39,24 @@ def load_config(config_path: Union[str, pathlib.Path]) -> dict:
 
 
 def time_stamp() -> str:
-    """
+    """UTC time stamps for logging
     :return: UTC time as a formatted string
     """
     return datetime.datetime.utcnow().strftime("%Y%m%d_%H:%M:%S")
 
 
 def log(message: str):
+    """Log message"""
     print(f"{time_stamp()}: {message}")
 
 
-def forgiving_true(expression):
+def forgiving_true(expression: Union[str, int, bool]):
+    """Forgivingly evaluate an expression meaning True"""
     return True if expression in ("t", "True", "true", "1", 1, True) else False
 
 
 def threshold(a, t: float = 0.5):
+    """Convert raw probabilities into 0/1 labels"""
     b = np.zeros_like(a, dtype=np.int64)
     b[np.array(a) > t] = 1
     return b
@@ -63,6 +64,7 @@ def threshold(a, t: float = 0.5):
 
 class DataSample:
     def __init__(self, alert: dict, label: Optional[str] = None, **kwargs):
+        """Data structure to store alert features and image cutouts"""
         self.kwargs = kwargs
 
         self.label = label
@@ -91,9 +93,7 @@ class DataSample:
         nan_to_median: bool = False,
         to_tpu: bool = False,
     ) -> np.array:
-        """
-        Feed in alert packet
-        """
+        """Standardize alert cutout images"""
         cutout_dict = dict()
 
         for cutout in ("science", "template", "difference"):
@@ -151,6 +151,7 @@ class DataSample:
         feature_names: Sequence[str] = tuple(),
         norms: Optional[dict] = None,
     ) -> np.array:
+        """Extract and standardize alert features"""
         features = []
         for feature_name in feature_names:
             feature = alert["candidate"].get(feature_name)
@@ -169,7 +170,6 @@ class DataSample:
 
 
 class DataSet:
-    # collection of DataSamples -> tf.data
     def __init__(
         self,
         tag: str,
@@ -179,6 +179,7 @@ class DataSet:
         verbose: bool = False,
         **kwargs,
     ):
+        """Data structure to store a collection of DataSamples as tf.data.Dataset's"""
         self.verbose = verbose
         self.tag = tag
 
@@ -200,7 +201,7 @@ class DataSet:
             print(self.labels)
 
     def load_data(self, labels: pd.DataFrame, **kwargs):
-        """Parse alert json files into features and image triplets
+        """Load from disk and parse alert json files into features and image triplets
 
         :param labels:
         :param kwargs:
@@ -430,7 +431,6 @@ class DataSet:
 
         if weight_per_class:
             # weight data class depending on number of examples?
-            # num_training_examples_per_class = np.array([len(target) - np.sum(target), np.sum(target)])
             num_training_examples_per_class = np.array(
                 [len(index_negative), len(index_positive)]
             )

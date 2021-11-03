@@ -24,9 +24,13 @@ import subprocess
 import sys
 from typing import Optional, Sequence, Union
 import tqdm
+import wandb
+from wandb.keras import WandbCallback
 import yaml
 
-from acai.utils import DataSample, forgiving_true, load_config, log, threshold
+
+from acai.nn import DNN
+from acai.utils import DataSample, DataSet, forgiving_true, load_config, log, threshold
 
 
 @contextmanager
@@ -86,7 +90,7 @@ def check_configs(config_wildcards: Sequence = ("config.*yaml",)):
                 raise KeyError("Fix config.yaml before proceeding")
 
 
-class Scope:
+class ACAI:
     def __init__(self):
         # check configuration
         with status("Checking configuration"):
@@ -229,12 +233,6 @@ class Scope:
             # otherwise run on CPU
             tf.config.experimental.set_visible_devices([], "GPU")
 
-        import wandb
-        from wandb.keras import WandbCallback
-
-        from acai.nn import DNN
-        from acai.utils import DataSet
-
         train_config = self.config["training"]["classes"][tag]
 
         features = self.config["features"][train_config["features"]]
@@ -292,8 +290,6 @@ class Scope:
         )
 
         # set up and train model
-        dense_branch = kwargs.get("dense_branch", True)
-        conv_branch = kwargs.get("conv_branch", True)
         loss = kwargs.get("loss", "binary_crossentropy")
         optimizer = kwargs.get("optimizer", "adam")
         lr = float(kwargs.get("lr", 3e-4))
@@ -301,22 +297,16 @@ class Scope:
         monitor = kwargs.get("monitor", "val_loss")
         patience = int(kwargs.get("patience", 20))
         callbacks = kwargs.get("callbacks", ("reduce_lr_on_plateau", "early_stopping"))
-        run_eagerly = kwargs.get("run_eagerly", False)
         pretrained_model = kwargs.get("pretrained_model")
         save = kwargs.get("save", False)
 
         # parse boolean args
-        dense_branch = forgiving_true(dense_branch)
-        conv_branch = forgiving_true(conv_branch)
-        run_eagerly = forgiving_true(run_eagerly)
         save = forgiving_true(save)
 
         classifier = DNN(name=tag)
 
         classifier.setup(
-            dense_branch=dense_branch,
             features_input_shape=(len(features),),
-            conv_branch=conv_branch,
             triplet_shape=(63, 63, 3),
             loss=loss,
             optimizer=optimizer,
@@ -325,7 +315,6 @@ class Scope:
             monitor=monitor,
             patience=patience,
             callbacks=callbacks,
-            run_eagerly=run_eagerly,
         )
 
         if verbose:
@@ -353,8 +342,6 @@ class Scope:
                     "random_state": random_state,
                     "batch_size": batch_size,
                     "architecture": "acai-net",
-                    "dense_branch": dense_branch,
-                    "conv_branch": conv_branch,
                 },
             )
             classifier.meta["callbacks"].append(WandbCallback())
@@ -409,7 +396,8 @@ class Scope:
                     )
                 ]
             )
-            print(df_test)
+            if verbose:
+                print(df_test)
 
             # correct confident positive predictions:
             # mask = (
@@ -476,6 +464,142 @@ class Scope:
 
             return time_tag
 
+    def sweep(
+        self,
+        tag: str,
+        path_labels: str,
+        path_data: str,
+        gpu: Optional[int] = None,
+        verbose: bool = False,
+        **kwargs,
+    ):
+        wandb.login(key=self.config["wandb"]["token"])
+
+        project = self.config["wandb"]["project"]
+
+        import tensorflow as tf
+
+        if gpu is not None:
+            # specified a GPU to run on?
+            gpus = tf.config.list_physical_devices("GPU")
+            tf.config.experimental.set_visible_devices(gpus[gpu], "GPU")
+        else:
+            # otherwise run on CPU
+            tf.config.experimental.set_visible_devices([], "GPU")
+
+        train_config = self.config["training"]["classes"][tag]
+
+        sweep_id = wandb.sweep(
+            sweep=train_config["sweep"],
+            project=project,
+        )
+
+        features = self.config["features"][train_config["features"]]
+
+        ds = DataSet(
+            tag=tag,
+            path_labels=path_labels,
+            path_data=path_data,
+            features=features,
+            verbose=verbose,
+            **kwargs,
+        )
+
+        label = train_config["label"]
+
+        def sweep_train():
+            time_tag = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            wandb.init(
+                tags=[tag],
+                name=f"{tag}-{time_tag}",
+                config={
+                    "tag": tag,
+                    "label": label,
+                    "dataset": pathlib.Path(path_labels).name,
+                },
+            )
+            dataset_parameters = {
+                key: wandb.config.get(key, default_value)
+                for (key, default_value) in (
+                    ("threshold", 0.5),
+                    ("balance", None),
+                    ("weight_per_class", False),
+                    ("scale_features", "min_max"),
+                    ("test_size", 0.1),
+                    ("val_size", 0.1),
+                    ("random_state", 42),
+                    ("feature_stats", None),
+                    ("batch_size", 32),
+                    ("shuffle_buffer_size", 128),
+                    ("epochs", 100),
+                    ("path_features", None),
+                    ("path_triplets", None),
+                )
+            }
+
+            datasets, metadata, indexes, steps_per_epoch, class_weight = ds.make(
+                target_label=label,
+                **dataset_parameters,
+            )
+
+            # set up and train model
+            model_parameters = {
+                key: wandb.config.get(key, default_value)
+                for (key, default_value) in (
+                    ("features_input_shape", (len(features),)),
+                    ("triplet_shape", (63, 63, 3)),
+                    ("dense_blocks", 2),
+                    ("dense_block_units", 64),
+                    ("dense_block_scale_factor", 0.5),
+                    ("dense_activation", "relu"),
+                    ("dense_dropout_rate", 0.25),
+                    ("conv_blocks", 2),
+                    ("conv_conv_layer_type", "SeparableConv2D"),
+                    ("conv_pool_layer_type", "MaxPooling2D"),
+                    ("conv_block_filters", 16),
+                    ("conv_block_filter_size", (3, 3)),
+                    ("conv_block_pool_size", (2, 2)),
+                    ("conv_block_scale_factor", 2),
+                    ("conv_dropout_rate", 0.25),
+                    ("head_blocks", 1),
+                    ("head_block_units", 16),
+                    ("head_block_scale_factor", 0.5),
+                    ("head_activation", "relu"),
+                    ("head_dropout_rate", 0),
+                    ("loss", "binary_crossentropy"),
+                    ("optimizer", "adam"),
+                    ("learning_rate", 3e-4),
+                    ("momentum", 0.9),
+                    ("monitor", "val_loss"),
+                    ("patience", 5),
+                    ("callbacks", ("reduce_lr_on_plateau", "early_stopping")),
+                    ("save", False),
+                )
+            }
+            # parse boolean args
+            for bool_param in ("save",):
+                model_parameters[bool_param] = forgiving_true(
+                    model_parameters[bool_param]
+                )
+
+            classifier = DNN(name=tag)
+
+            classifier.setup(**model_parameters)
+
+            classifier.meta["callbacks"].append(WandbCallback())
+
+            classifier.train(
+                datasets["train"],
+                datasets["val"],
+                steps_per_epoch["train"],
+                steps_per_epoch["val"],
+                epochs=dataset_parameters.get("epochs"),
+                class_weight=class_weight,
+                verbose=verbose,
+            )
+
+        wandb.agent(sweep_id, function=sweep_train)
+
     def test(self):
         """Test different workflows
 
@@ -538,4 +662,4 @@ class Scope:
 
 
 if __name__ == "__main__":
-    fire.Fire(Scope)
+    fire.Fire(ACAI)
