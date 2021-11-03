@@ -13,7 +13,7 @@ pytest>=6.1.2
 pyyaml>=6.0
 questionary>=1.8.1
 scikit-learn>=1.0
-tensorflow>=2.4
+tensorflow<2.6
 tensorflow-addons>=0.12
 tqdm>=4.62
 wandb>=0.12.5
