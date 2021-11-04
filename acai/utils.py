@@ -16,12 +16,17 @@ import datetime
 import gzip
 import io
 import numpy as np
+import os
 import pandas as pd
 import pathlib
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from typing import Optional, Sequence, Union
 import yaml
+
+
+# turn off the annoying tensorflow messages
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 
 braai = None
@@ -215,6 +220,63 @@ class DataSet:
             print("Labels:")
             print(self.labels)
 
+    def preprocess(self, entries):
+        """Helper function to load data in parallel"""
+        preprocessed_entries = []
+        for entry in entries:
+            with open(self.path_data / f"{entry['candid']}.json", "r") as f:
+                alert = bju.loads(f.read())
+            data_sample = DataSample(
+                alert=alert,
+                label=entry["label"],
+                feature_names=self.feature_names,
+                feature_norms=self.feature_norms,
+            )
+            preprocessed_entries.append(
+                {
+                    "index": entry["i"],
+                    "features": data_sample.data.get("features"),
+                    "triplet": data_sample.data.get("triplet"),
+                    "meta": {
+                        "oid": alert["objectId"],
+                        "candid": alert["candid"],
+                        "ra": alert["candidate"]["ra"],
+                        "dec": alert["candidate"]["dec"],
+                    },
+                }
+            )
+            return preprocessed_entries
+
+    def load_data_parallel(
+        self,
+        labels: pd.DataFrame,
+        num_processes: int = None,
+    ):
+        """Load from disk and parse alert json files into features and image triplets"""
+        import multiprocessing as mp
+
+        if num_processes is None:
+            num_processes = mp.cpu_count()
+
+        labels["i"] = range(len(labels))
+
+        features = np.empty(shape=(len(labels), len(self.feature_names)))
+        triplets = np.empty(shape=(len(labels), 63, 63, 3))
+        meta = np.empty(shape=(len(labels),), dtype=object)
+
+        batches = np.array_split(labels.to_dict('records'), num_processes)
+
+        with mp.Pool(processes=num_processes) as p:
+            results = list(tqdm(p.imap(self.preprocess, batches), total=len(batches)))
+
+        for batch in results:
+            for result in batch:
+                features[result["index"]] = result["features"]
+                triplets[result["index"]] = result["triplet"]
+                meta[result["index"]] = result["meta"]
+
+        return features, triplets, meta
+
     def load_data(self, labels: pd.DataFrame, **kwargs):
         """Load from disk and parse alert json files into features and image triplets
 
@@ -347,8 +409,6 @@ class DataSet:
             self.triplets = np.load(path_triplets)
         else:
             self.features, self.triplets, self.meta = self.load_data(self.labels)
-        # self.features = np.zeros((total, len(self.feature_names), 1))
-        # self.triplets = np.zeros((total, 63, 63, 3))
 
         # make tf.data.Dataset's:
         train_dataset = tf.data.Dataset.from_tensor_slices(

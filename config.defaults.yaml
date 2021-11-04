@@ -86,6 +86,8 @@ training:
           goal: "minimize"
         method: "grid"
         parameters:
+          balance:
+            value: 1.2
           epochs:
             value: 100
           patience:

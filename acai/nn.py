@@ -18,6 +18,10 @@ from typing import Tuple
 from .models import AbstractClassifier
 
 
+# turn off the annoying tensorflow messages
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
+
 class DNN(AbstractClassifier):
     """Hybrid MLP+CNN model"""
 
