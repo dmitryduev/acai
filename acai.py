@@ -28,8 +28,6 @@ import wandb
 from wandb.keras import WandbCallback
 import yaml
 
-
-from acai.nn import DNN
 from acai.utils import DataSample, DataSet, forgiving_true, load_config, log, threshold
 
 
@@ -232,6 +230,8 @@ class ACAI:
         else:
             # otherwise run on CPU
             tf.config.experimental.set_visible_devices([], "GPU")
+
+        from acai.nn import DNN
 
         train_config = self.config["training"]["classes"][tag]
 
@@ -486,6 +486,8 @@ class ACAI:
         else:
             # otherwise run on CPU
             tf.config.experimental.set_visible_devices([], "GPU")
+
+        from acai.nn import DNN
 
         train_config = self.config["training"]["classes"][tag]
 
