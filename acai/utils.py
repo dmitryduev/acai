@@ -245,7 +245,7 @@ class DataSet:
                     },
                 }
             )
-            return preprocessed_entries
+        return preprocessed_entries
 
     def load_data_parallel(
         self,
