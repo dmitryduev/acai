@@ -72,7 +72,6 @@ training:
     acai_h:
       # value of label should refer to dataset.dN.csv
       label: "h"
-      conv_branch: true
       # value should refer to features section of this config
       features: "20201130"
       # balance ratio for the prevalent class. leave null to use all available data

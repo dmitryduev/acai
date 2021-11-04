@@ -162,7 +162,7 @@ class DNN(AbstractClassifier):
             x = tf.keras.layers.Dropout(dropout_rate)(x)
             return x
 
-        num_dense_blocks = kwargs.get("dense_blocks", 1)
+        num_dense_blocks = kwargs.get("dense_blocks", 2)
         num_conv_blocks = kwargs.get("conv_blocks", 2)
         num_head_blocks = kwargs.get("head_blocks", 1)
 
