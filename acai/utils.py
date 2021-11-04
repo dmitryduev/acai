@@ -19,15 +19,12 @@ import numpy as np
 import pandas as pd
 import pathlib
 from sklearn.model_selection import train_test_split
-import tensorflow as tf
 from tqdm import tqdm
 from typing import Optional, Sequence, Union
 import yaml
 
 
-braai = tf.keras.models.load_model(
-    pathlib.Path(__file__).parent.parent / "models/braai/braai_d6_m9.h5"
-)
+braai = None
 
 
 def load_config(config_path: Union[str, pathlib.Path]) -> dict:
@@ -65,6 +62,8 @@ def threshold(a, t: float = 0.5):
 class DataSample:
     def __init__(self, alert: dict, label: Optional[str] = None, **kwargs):
         """Data structure to store alert features and image cutouts"""
+        self.load_braai()
+
         self.kwargs = kwargs
 
         self.label = label
@@ -85,6 +84,22 @@ class DataSample:
             "triplet": self.triplet,
             "features": self.features,
         }
+
+    @staticmethod
+    def load_braai():
+        """Load the braai model at init
+        Done this ugly way not to run into the
+        "RuntimeError: Visible devices cannot be modified after being initialized"
+        error when setting up/selecting GPUs in acai.py
+        Really wish there were a nicer way.
+        """
+        global braai
+        if braai is None:
+            import tensorflow as tf
+
+            braai = tf.keras.models.load_model(
+                pathlib.Path(__file__).parent.parent / "models/braai/braai_d6_m9.h5"
+            )
 
     @staticmethod
     def make_triplet(
@@ -267,6 +282,8 @@ class DataSet:
         :param epochs
         :return:
         """
+        import tensorflow as tf
+
         mask_positive = self.labels.label == target_label
         self.target = np.expand_dims(mask_positive, axis=1)
         self.target_label = target_label
