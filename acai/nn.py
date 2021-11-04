@@ -19,16 +19,12 @@ from .models import AbstractClassifier
 
 
 class DNN(AbstractClassifier):
-    """
-    Baseline model with a statically-defined graph
-    """
+    """Hybrid MLP+CNN model"""
 
     def setup(
         self,
         features_shape=(25,),
         triplet_shape=(63, 63, 3),
-        dense_branch=True,
-        conv_branch=True,
         loss="binary_crossentropy",
         optimizer="adam",
         callbacks=("early_stopping", "tensorboard"),
@@ -42,8 +38,6 @@ class DNN(AbstractClassifier):
         self.model = self.build_model(
             features_shape=features_shape,
             triplet_shape=triplet_shape,
-            dense_branch=dense_branch,
-            conv_branch=conv_branch,
             **kwargs,
         )
 
@@ -132,6 +126,8 @@ class DNN(AbstractClassifier):
 
     @staticmethod
     def build_model(**kwargs):
+        """Build a tunable model that can consume hyper-parameter suggestions"""
+
         def dense_block(
             x,
             units: int = 64,
@@ -246,7 +242,7 @@ class DNN(AbstractClassifier):
         class_weight=None,
         verbose=0,
     ):
-
+        """Execute full training cycle"""
         if not class_weight:
             # all our problems here are binary classification ones:
             class_weight = {i: 1 for i in range(2)}
@@ -266,12 +262,85 @@ class DNN(AbstractClassifier):
         return self.model.evaluate(test_dataset, **kwargs)
 
     def predict(self, x, **kwargs):
+        """Run inference using classifier.model
+
+        :param x:
+        :param kwargs:
+        :return:
+
+        Example:
+        - Get ZTF alerts and convert them into dict. For example, using Kowalski
+        >>> from penquins import Kowalski
+        >>> kowalski = Kowalski(...)
+        >>> query = {
+        >>>     "query_type": "find",
+        >>>     "query": {
+        >>>         "catalog": "ZTF_alerts",
+        >>>         "filter": {
+        >>>             "objectId": "ZTF20abyzoof",
+        >>>         }
+        >>>     }
+        >>> }
+        >>> alerts = kowalski.query(query=query)["data"]
+        - Extract features and image cutout triplets from the grabbed alerts
+        >>> feature_names = (
+        >>>     "drb",
+        >>>     "diffmaglim",
+        >>>     "ra",
+        >>>     "dec",
+        >>>     "magpsf",
+        >>>     "sigmapsf",
+        >>>     "chipsf",
+        >>>     "fwhm",
+        >>>     "sky",
+        >>>     "chinr",
+        >>>     "sharpnr",
+        >>>     "sgscore1",
+        >>>     "distpsnr1",
+        >>>     "sgscore2",
+        >>>     "distpsnr2",
+        >>>     "sgscore3",
+        >>>     "distpsnr3",
+        >>>     "ndethist",
+        >>>     "ncovhist",
+        >>>     "scorr",
+        >>>     "nmtchps",
+        >>>     "clrcoeff",
+        >>>     "clrcounc",
+        >>>     "neargaia",
+        >>>     "neargaiabright",
+        >>> )
+        >>>
+        >>> import acai
+        >>> samples = [
+        >>>     acai.DataSample(
+        >>>         alert=alert,
+        >>>         feature_names=feature_names,
+        >>>     )
+        >>>     for alert in alerts
+        >>> ]
+        >>>
+        >>> import numpy as np
+        >>> features = []
+        >>> triplets = []
+        >>> for sample in samples:
+        >>>     features.append(np.expand_dims(sample.data["features"], axis=[-1]))
+        >>>     triplets.append(sample.data["triplet"])
+        >>> features = np.array(features)
+        >>> triplets = np.array(triplets)
+        - Load a pre-trained model and run inference
+        >>> classifier = acai.DNN(name="h")
+        >>> classifier.load("models/acai_h.d1_dnn_20201130.h5")
+        >>> h = classifier.predict([features, triplets])
+        """
         return self.model.predict(x, **kwargs)
 
     def load(self, path_model, **kwargs):
+        """Load pre-trained model"""
         self.model = tf.keras.models.load_model(path_model, **kwargs)
 
     def save(self, output_path="./", output_format="hdf5", tag=None):
+        """Save model"""
         import pathlib
 
         if output_format not in ("tf", "hdf5"):

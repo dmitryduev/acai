@@ -33,7 +33,7 @@ from acai.utils import DataSample, DataSet, forgiving_true, load_config, log, th
 
 @contextmanager
 def status(message):
-    """
+    """Display a fancy status message
     Borrowed from https://github.com/cesium-ml/baselayer/
 
     :param message: message to print
@@ -90,6 +90,7 @@ def check_configs(config_wildcards: Sequence = ("config.*yaml",)):
 
 class ACAI:
     def __init__(self):
+        """CLI commands"""
         # check configuration
         with status("Checking configuration"):
             check_configs(config_wildcards=["config.*yaml"])
@@ -137,8 +138,7 @@ class ACAI:
 
     @staticmethod
     def fetch_datasets(gcs_path: str = "gs://ztf-acai"):
-        """
-        Fetch ACAI datasets from GCP
+        """Fetch ACAI datasets from GCP
 
         :return:
         """
@@ -162,6 +162,9 @@ class ACAI:
 
     @staticmethod
     def alert_images(path_data: str, candid: int) -> dict:
+        """Turn alert image cutouts into matplotlib figures
+        to be posted to wandb
+        """
         normalizer = AsymmetricPercentileInterval(
             lower_percentile=1, upper_percentile=100
         )
@@ -473,6 +476,16 @@ class ACAI:
         verbose: bool = False,
         **kwargs,
     ):
+        """Run hyper-parameter tuning with W&B Sweeps
+
+        :param tag:
+        :param path_labels:
+        :param path_data:
+        :param gpu:
+        :param verbose:
+        :param kwargs:
+        :return:
+        """
         wandb.login(key=self.config["wandb"]["token"])
 
         project = self.config["wandb"]["project"]
@@ -490,6 +503,7 @@ class ACAI:
         from acai.nn import DNN
 
         train_config = self.config["training"]["classes"][tag]
+        # train_config["sweep"] contains sweep configuration
 
         sweep_id = wandb.sweep(
             sweep=train_config["sweep"],
@@ -603,10 +617,7 @@ class ACAI:
         wandb.agent(sweep_id, function=sweep_train)
 
     def test(self):
-        """Test different workflows
-
-        :return:
-        """
+        """Test different workflows"""
         import shutil
         import string
         import uuid
