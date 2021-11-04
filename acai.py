@@ -303,7 +303,8 @@ class ACAI:
         momentum = float(kwargs.get("momentum", 0.9))
         monitor = kwargs.get("monitor", "val_loss")
         patience = int(kwargs.get("patience", 20))
-        callbacks = kwargs.get("callbacks", ("reduce_lr_on_plateau", "early_stopping"))
+        # callbacks = kwargs.get("callbacks", ("reduce_lr_on_plateau", "early_stopping"))
+        callbacks = kwargs.get("callbacks", ("early_stopping",))
         pretrained_model = kwargs.get("pretrained_model")
         save = kwargs.get("save", False)
 
