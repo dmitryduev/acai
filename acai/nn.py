@@ -183,7 +183,7 @@ class DNN(AbstractClassifier):
             for i in range(num_dense_blocks):
                 x_dense = dense_block(
                     x=x_dense,
-                    units=kwargs.get("dense_block_units", 32)
+                    units=kwargs.get("dense_block_units", 64)
                     * (dense_block_scale_factor ** i),
                     activation=kwargs.get("dense_activation", "relu"),
                     dropout_rate=kwargs.get("dense_dropout_rate", 0.25),
