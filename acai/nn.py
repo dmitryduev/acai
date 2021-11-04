@@ -2,7 +2,7 @@
     A bowl of Deep Neural Networks for acai
 
     Author: Dr Dmitry A. Duev
-    November 2020
+    2020 - 2021
 """
 
 __all__ = [
