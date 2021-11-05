@@ -408,7 +408,7 @@ class DataSet:
         if None not in (path_features, path_triplets, path_meta):
             self.features = np.load(path_features)
             self.triplets = np.load(path_triplets)
-            self.meta = np.load(path_meta)
+            self.meta = np.load(path_meta, allow_pickle=True)
         else:
             if kwargs.get("parallel_data_load", False):
                 self.features, self.triplets, self.meta = self.load_data_parallel(
