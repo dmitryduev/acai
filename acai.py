@@ -561,7 +561,7 @@ class ACAI:
         # create a mock dataset and check that the training pipeline finishes
         labels = f"{uuid.uuid4().hex}.csv"
 
-        path_mock = pathlib.Path(__file__).parent.absolute() / "data" / "mock"
+        path_mock = pathlib.Path(__file__).parent.parent.absolute() / "data" / "mock"
         path_features = path_mock / f"{uuid.uuid4().hex}.npy"
         path_triplets = path_mock / f"{uuid.uuid4().hex}.npy"
 
