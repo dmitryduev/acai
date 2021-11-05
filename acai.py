@@ -561,9 +561,10 @@ class ACAI:
         # create a mock dataset and check that the training pipeline finishes
         labels = f"{uuid.uuid4().hex}.csv"
 
-        path_mock = pathlib.Path(__file__).parent.parent.absolute() / "data" / "mock"
+        path_mock = pathlib.Path(__file__).parent.absolute() / "data" / "mock"
         path_features = path_mock / f"{uuid.uuid4().hex}.npy"
         path_triplets = path_mock / f"{uuid.uuid4().hex}.npy"
+        path_meta = path_mock / f"{uuid.uuid4().hex}.npy"
 
         try:
             if not path_mock.exists():
@@ -575,13 +576,30 @@ class ACAI:
             np.save(str(path_triplets), np.random.random((n_samples, 63, 63, 3)))
 
             entries = []
+            meta = []
             for i in range(n_samples):
+                oid = f"ZTF87{''.join(random.choices(string.ascii_lowercase, k=7))}"
+                candid = random.randint(600000000000000000, 1600000000000000000)
+                label = random.choice(("h", "o", "n", "b", "v"))
                 entry = dict(
-                    oid=f"ZTF87{''.join(random.choices(string.ascii_lowercase, k=7))}",
-                    candid=random.randint(600000000000000000, 1600000000000000000),
-                    label=random.choice(("h", "o", "n", "b", "v")),
+                    oid=oid,
+                    candid=candid,
+                    label=label,
                 )
                 entries.append(entry)
+
+                ra = random.uniform(0, 360.0)
+                dec = random.uniform(-90, 90)
+                meta.append(
+                    {
+                        "oid": oid,
+                        "candid": candid,
+                        "ra": ra,
+                        "dec": dec,
+                    }
+                )
+
+            np.save(str(path_meta), np.array(meta))
 
             df_mock = pd.DataFrame.from_records(entries)
             df_mock.to_csv(path_mock / labels, index=False)
@@ -593,6 +611,7 @@ class ACAI:
                 path_data=str(path_mock / "alerts"),
                 path_features=path_features,
                 path_triplets=path_triplets,
+                path_meta=path_meta,
                 batch_size=16,
                 epochs=3,
                 verbose=True,
