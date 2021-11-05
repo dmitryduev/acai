@@ -47,7 +47,7 @@ class DNN(AbstractClassifier):
 
         self.meta["loss"] = loss
         if optimizer == "adam":
-            lr = kwargs.get("lr", 3e-4)
+            lr = float(kwargs.get("lr", kwargs.get("learning_rate", 3e-4)))
             beta_1 = kwargs.get("beta_1", 0.9)
             beta_2 = kwargs.get("beta_2", 0.999)
             epsilon = kwargs.get("epsilon", 1e-7)  # None?
@@ -62,7 +62,7 @@ class DNN(AbstractClassifier):
                 amsgrad=amsgrad,
             )
         elif optimizer == "sgd":
-            lr = kwargs.get("lr", 3e-4)
+            lr = float(kwargs.get("lr", kwargs.get("learning_rate", 3e-4)))
             momentum = kwargs.get("momentum", 0.9)
             decay = kwargs.get("epsilon", 1e-6)
             nesterov = kwargs.get("nesterov", True)
@@ -186,7 +186,9 @@ class DNN(AbstractClassifier):
                     units=kwargs.get("dense_block_units", 64)
                     * (dense_block_scale_factor ** i),
                     activation=kwargs.get("dense_activation", "relu"),
-                    dropout_rate=kwargs.get("dense_dropout_rate", 0.25),
+                    dropout_rate=kwargs.get("dense_dropout_rate", 0.25)
+                    if i == 0
+                    else 0,
                 )
 
         # CNN branch to digest image cutouts

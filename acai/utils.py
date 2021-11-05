@@ -327,8 +327,8 @@ class DataSet:
         test_size: float = 0.1,
         val_size: float = 0.1,
         random_state: int = 42,
-        batch_size: int = 256,
-        shuffle_buffer_size: int = 256,
+        batch_size: int = 32,
+        shuffle_buffer_size: int = 64,
         epochs: int = 300,
         **kwargs,
     ):
@@ -404,11 +404,18 @@ class DataSet:
         # load and normalize data
         path_features: Optional[Union[str, pathlib.Path]] = kwargs.get("path_features")
         path_triplets: Optional[Union[str, pathlib.Path]] = kwargs.get("path_triplets")
-        if path_features is not None and path_triplets is not None:
+        path_meta: Optional[Union[str, pathlib.Path]] = kwargs.get("path_meta")
+        if None not in (path_features, path_triplets, path_meta):
             self.features = np.load(path_features)
             self.triplets = np.load(path_triplets)
+            self.meta = np.load(path_meta)
         else:
-            self.features, self.triplets, self.meta = self.load_data(self.labels)
+            if kwargs.get("parallel_data_load", False):
+                self.features, self.triplets, self.meta = self.load_data_parallel(
+                    self.labels
+                )
+            else:
+                self.features, self.triplets, self.meta = self.load_data(self.labels)
 
         # make tf.data.Dataset's:
         train_dataset = tf.data.Dataset.from_tensor_slices(
@@ -526,6 +533,6 @@ class DataSet:
 
         else:
             # working with binary classifiers only
-            class_weight = {i: 1 for i in range(2)}
+            class_weight = kwargs.get("class_weight", {i: 1 for i in range(2)})
 
         return datasets, metadata, indexes, steps_per_epoch, class_weight

@@ -22,7 +22,7 @@ import random
 import questionary
 import subprocess
 import sys
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence
 import tqdm
 import wandb
 from wandb.keras import WandbCallback
@@ -220,12 +220,12 @@ class ACAI:
     ):
         """Train classifier
 
-        :param tag: classifier designation, refers to "class" in config.taxonomy
+        :param tag: classifier designation, refers to model tag in config.models
         :param path_labels: local path to csv file with the labels
         :param path_data: local path to alert json files
         :param gpu: GPU id to use, zero-based. check tf.config.list_physical_devices('GPU') for available devices
         :param verbose:
-        :param kwargs: refer to utils.DNN.setup and utils.Dataset.make
+        :param kwargs: refer to config.models + utils.DNN.setup and utils.Dataset.make
         :return:
         """
         import tensorflow as tf
@@ -238,11 +238,19 @@ class ACAI:
             # otherwise run on CPU
             tf.config.experimental.set_visible_devices([], "GPU")
 
-        from acai.nn import DNN
+        from acai import DNN
 
-        train_config = self.config["training"]["classes"][tag]
-
+        train_config = self.config["models"][tag]
         features = self.config["features"][train_config["features"]]
+
+        train_config["parameters"]["features_shape"] = (len(features),)
+        train_config["parameters"]["triplet_shape"] = (63, 63, 3)
+
+        # overwrite training parameters with kwargs from CLI
+        train_config["parameters"] = {
+            **train_config["parameters"],
+            **kwargs,
+        }
 
         ds = DataSet(
             tag=tag,
@@ -250,84 +258,24 @@ class ACAI:
             path_data=path_data,
             features=features,
             verbose=verbose,
-            **kwargs,
+            **train_config["parameters"],
         )
 
         label = train_config["label"]
 
-        # values from kwargs override those defined in config. if latter is absent, use reasonable default
-        thrshold = kwargs.get("threshold", train_config.get("threshold", 0.5))
-        balance = kwargs.get("balance", train_config.get("balance", None))
-        weight_per_class = kwargs.get(
-            "weight_per_class", train_config.get("weight_per_class", False)
-        )
-        scale_features = kwargs.get("scale_features", "min_max")
-
-        test_size = kwargs.get("test_size", train_config.get("test_size", 0.1))
-        val_size = kwargs.get("val_size", train_config.get("val_size", 0.1))
-        random_state: int = kwargs.get(
-            "random_state", train_config.get("random_state", 42)
-        )
-        feature_stats = self.config.get("feature_stats", None)
-
-        batch_size: int = kwargs.get("batch_size", train_config.get("batch_size", 32))
-        shuffle_buffer_size: int = kwargs.get(
-            "shuffle_buffer_size", train_config.get("shuffle_buffer_size", 128)
-        )
-        epochs: int = kwargs.get("epochs", train_config.get("epochs", 100))
-
-        path_features: Optional[Union[str, pathlib.Path]] = kwargs.get("path_features")
-        path_triplets: Optional[Union[str, pathlib.Path]] = kwargs.get("path_triplets")
-
         datasets, metadata, indexes, steps_per_epoch, class_weight = ds.make(
             target_label=label,
-            threshold=thrshold,
-            balance=balance,
-            weight_per_class=weight_per_class,
-            scale_features=scale_features,
-            test_size=test_size,
-            val_size=val_size,
-            random_state=random_state,
-            feature_stats=feature_stats,
-            batch_size=batch_size,
-            shuffle_buffer_size=shuffle_buffer_size,
-            epochs=epochs,
-            path_features=path_features,
-            path_triplets=path_triplets,
+            **train_config["parameters"],
         )
-
-        # set up and train model
-        loss = kwargs.get("loss", "binary_crossentropy")
-        optimizer = kwargs.get("optimizer", "adam")
-        lr = float(kwargs.get("lr", 3e-4))
-        momentum = float(kwargs.get("momentum", 0.9))
-        monitor = kwargs.get("monitor", "val_loss")
-        patience = int(kwargs.get("patience", 20))
-        # callbacks = kwargs.get("callbacks", ("reduce_lr_on_plateau", "early_stopping"))
-        callbacks = kwargs.get("callbacks", ("early_stopping",))
-        pretrained_model = kwargs.get("pretrained_model")
-        save = kwargs.get("save", False)
-
-        # parse boolean args
-        save = forgiving_true(save)
 
         classifier = DNN(name=tag)
 
-        classifier.setup(
-            features_input_shape=(len(features),),
-            triplet_shape=(63, 63, 3),
-            loss=loss,
-            optimizer=optimizer,
-            learning_rate=lr,
-            momentum=momentum,
-            monitor=monitor,
-            patience=patience,
-            callbacks=callbacks,
-        )
+        classifier.setup(**train_config["parameters"])
 
         if verbose:
             print(classifier.model.summary())
 
+        pretrained_model = train_config["parameters"].get("pretrained_model", None)
         if pretrained_model is not None:
             classifier.load(pretrained_model)
 
@@ -339,18 +287,7 @@ class ACAI:
                 project=self.config["wandb"]["project"],
                 tags=[tag],
                 name=f"{tag}-{time_tag}",
-                config={
-                    "tag": tag,
-                    "label": label,
-                    "dataset": pathlib.Path(path_labels).name,
-                    "scale_features": scale_features,
-                    "learning_rate": lr,
-                    "epochs": epochs,
-                    "patience": patience,
-                    "random_state": random_state,
-                    "batch_size": batch_size,
-                    "architecture": "acai-net",
-                },
+                config=train_config["parameters"],
             )
             classifier.meta["callbacks"].append(WandbCallback())
 
@@ -359,7 +296,7 @@ class ACAI:
             datasets["val"],
             steps_per_epoch["train"],
             steps_per_epoch["val"],
-            epochs=epochs,
+            epochs=train_config["parameters"].get("epochs", 100),
             class_weight=class_weight,
             verbose=verbose,
         )
@@ -379,7 +316,9 @@ class ACAI:
 
             preds = classifier.model.predict([test_features, test_triplets]).flatten()
             # apply threshold to float predictions
-            preds_int = threshold(preds, t=thrshold)
+            preds_int = threshold(
+                preds, t=train_config["parameters"].get("threshold", 0.5)
+            )
             df_test = pd.DataFrame.from_records(
                 [
                     {
@@ -406,14 +345,6 @@ class ACAI:
             )
             if verbose:
                 print(df_test)
-
-            # correct confident positive predictions:
-            # mask = (
-            #     (df_test["miss"] == 0)
-            #     & (df_test["label"] == 1)
-            #     & (df_test["pred"] > 0.9)
-            # )
-            # df_test_masked = df_test.loc[mask].sample(n=5)
 
             wandb.log({"Test set": wandb.Table(dataframe=df_test)})
 
@@ -460,7 +391,7 @@ class ACAI:
                     2 * p * r / (p + r) if p + r != 0 else "undefined"
                 )
 
-        if save:
+        if train_config["parameters"].get("save", False):
             output_path = str(pathlib.Path(__file__).parent.absolute() / "models" / tag)
             if verbose:
                 print(f"Saving model to {output_path}")
@@ -567,7 +498,7 @@ class ACAI:
             model_parameters = {
                 key: wandb.config.get(key, default_value)
                 for (key, default_value) in (
-                    ("features_input_shape", (len(features),)),
+                    ("features_shape", (len(features),)),
                     ("triplet_shape", (63, 63, 3)),
                     ("dense_blocks", 2),
                     ("dense_block_units", 64),
