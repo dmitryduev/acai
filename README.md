@@ -1,6 +1,7 @@
 # ACAI: Alert-Classifying AI for the Zwicky Transient Facility
 
 [![arXiv](https://img.shields.io/badge/arXiv-2111.XXXXX-brightgreen)](https://arxiv.org/abs/2111.XXXXX)
+
 (presented at the NeurIPS 2021 [ML4PS workshop](https://ml4physicalsciences.github.io/2021/))
 
 Astronomy has been experiencing an explosive increase in the data volumes,
