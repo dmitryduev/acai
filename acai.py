@@ -141,12 +141,14 @@ class ACAI:
             sys.exit(1)
 
     @staticmethod
-    def fetch_datasets(gcs_path: str = "gs://ztf-acai"):
-        """Fetch ACAI datasets from GCP
+    def fetch_datasets(
+        gcs_bucket: str = "gs://ztf-acai", fetch_json_alerts: bool = False
+    ):
+        """Fetch ACAI datasets from the cloud
 
         :return:
         """
-        path_datasets = pathlib.Path(__file__).parent / "data" / "training"
+        path_datasets = pathlib.Path(__file__).parent / "data"
         if not path_datasets.exists():
             path_datasets.mkdir(parents=True, exist_ok=True)
 
@@ -157,12 +159,29 @@ class ACAI:
                 "cp",
                 "-n",
                 "-r",
-                os.path.join(gcs_path, f"*.{extension}"),
+                os.path.join(gcs_bucket, f"*.{extension}"),
                 str(path_datasets),
             ]
             p = subprocess.run(command, check=True)
             if p.returncode != 0:
                 raise RuntimeError("Failed to fetch ACAI datasets")
+
+        if fetch_json_alerts:
+            path_alerts = pathlib.Path(__file__).parent / "data" / "alerts"
+            if not path_alerts.exists():
+                path_alerts.mkdir(parents=True, exist_ok=True)
+            command = [
+                "gsutil",
+                "-m",
+                "cp",
+                "-n",
+                "-r",
+                os.path.join(gcs_bucket, "alerts/*.json"),
+                str(path_alerts),
+            ]
+            p = subprocess.run(command, check=True)
+            if p.returncode != 0:
+                raise RuntimeError("Failed to fetch alert packets")
 
     @staticmethod
     def alert_images(path_data: str, candid: int) -> dict:
