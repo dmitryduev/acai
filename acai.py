@@ -94,7 +94,7 @@ def check_configs(config_wildcards: Sequence = ("config.*yaml",)):
 
 class ACAI:
     def __init__(self):
-        """CLI commands"""
+        """ACAI CLI commands"""
         # check configuration
         with status("Checking configuration"):
             check_configs(config_wildcards=["config.*yaml"])
@@ -184,7 +184,7 @@ class ACAI:
                 raise RuntimeError("Failed to fetch alert packets")
 
     @staticmethod
-    def alert_images(path_data: str, candid: int) -> dict:
+    def _alert_images(path_data: str, candid: int) -> dict:
         """Turn alert image cutouts into matplotlib figures
         to be posted to wandb
         """
@@ -237,7 +237,7 @@ class ACAI:
         verbose: bool = False,
         **kwargs,
     ):
-        """Train classifier
+        """Train an ACAI classifier
 
         :param tag: classifier designation, refers to model tag in config.models
         :param path_labels: local path to csv file with the labels
@@ -351,7 +351,7 @@ class ACAI:
                         },
                         **{
                             key: wandb.Image(fig)
-                            for key, fig in self.alert_images(
+                            for key, fig in self._alert_images(
                                 path_data=path_data, candid=meta["candid"]
                             ).items()
                             if fig is not None
