@@ -1,0 +1,187 @@
+wandb:
+  project: acai
+  # Get your W&B token at https://wandb.ai/authorize
+  token:
+kowalski:
+  host: kowalski.caltech.edu
+  port: 443
+  protocol: https
+  token:
+  collections:
+    alerts: ZTF_alerts
+fritz:
+  token:
+  protocol: https
+  host: fritz.science
+
+features:
+  "20201130":
+    drb:
+      norm: 1
+    diffmaglim:
+      norm: 1
+    ra:
+      norm: 1
+    dec:
+      norm: 1
+    magpsf:
+      norm: 1
+    sigmapsf:
+      norm: 1
+    chipsf:
+      norm: 1
+    fwhm:
+      norm: 1
+    sky:
+      norm: 1
+    chinr:
+      norm: 1
+    sharpnr:
+      norm: 1
+    sgscore1:
+      norm: 1
+    distpsnr1:
+      norm: 1
+    sgscore2:
+      norm: 1
+    distpsnr2:
+      norm: 1
+    sgscore3:
+      norm: 1
+    distpsnr3:
+      norm: 1
+    ndethist:
+      norm: 1
+    ncovhist:
+      norm: 1
+    scorr:
+      norm: 1
+    nmtchps:
+      norm: 1
+    clrcoeff:
+      norm: 1
+    clrcounc:
+      norm: 1
+    neargaia:
+      norm: 1
+    neargaiabright:
+      norm: 1
+
+models:
+  acai_h:
+    # value of label should refer to dataset.dN.csv
+    label: "h"
+    # value should refer to features section of this config
+    features: "20201130"
+    parameters:
+      threshold: 0.5
+      # balance ratio for the prevalent class. leave null to use all available data
+      balance: 2.5
+      # balance: 1.1
+      weight_per_class: false
+      class_weight:
+        0: 1
+        1: 1
+      scale_features: "min_max"
+      test_size: 0.1
+      val_size: 0.1
+      random_state: 42
+      batch_size: 32
+      shuffle_buffer_size: 128
+      epochs: 100
+      features_input_shape:
+        - 25
+      triplet_shape:
+        - 63
+        - 63
+        - 3
+      dense_blocks: 2
+      dense_block_units: 64
+      dense_block_scale_factor: 0.5
+      dense_activation: "relu"
+      dense_dropout_rate: 0.25
+      conv_blocks: 2
+      conv_conv_layer_type: "SeparableConv2D"
+      conv_pool_layer_type: "MaxPooling2D"
+      conv_block_filters: 16
+      conv_block_filter_size:
+        - 3
+        - 3
+      conv_block_pool_size:
+        - 2
+        - 2
+      conv_block_scale_factor: 2
+      conv_dropout_rate: 0.25
+      head_blocks: 1
+      head_block_units: 16
+      head_block_scale_factor: 0.5
+      head_activation: "relu"
+      head_dropout_rate: 0
+      loss: "binary_crossentropy"
+      optimizer: "adam"
+      learning_rate: 3e-4
+      momentum: 0.9
+      monitor: "val_loss"
+      patience: 5
+      callbacks:
+        - "reduce_lr_on_plateau"
+        - "early_stopping"
+      save: false
+    sweep:
+      # refer to https://docs.wandb.ai/guides/sweeps
+      metric:
+        name: "val_loss"
+        goal: "minimize"
+      method: "grid"
+      parameters:
+        balance:
+          value: 2.5
+        epochs:
+          value: 100
+        patience:
+          value: 10
+        threshold:
+          value: 0.5
+        dense_block_units:
+          values:
+            - 64
+            - 128
+            - 256
+        conv_block_filters:
+          values:
+            - 16
+            - 32
+            - 64
+        head_block_units:
+          values:
+            - 16
+            - 32
+            - 64
+  acai_b:
+    label: "b"
+    features: "20201130"
+    parameters:
+      balance: 2.5
+      # balance: 1.1
+      weight_per_class: false
+  acai_o:
+    label: "o"
+    features: "20201130"
+    parameters:
+      balance: 2.5
+      # balance: 1.1
+      weight_per_class: false
+  acai_n:
+    label: "n"
+    features: "20201130"
+    parameters:
+      balance: 2.5
+      # balance: 1.1
+      weight_per_class: false
+  acai_v:
+    label: "v"
+    features: "20201130"
+    parameters:
+      balance: 2.5
+      # balance: 1.1
+      weight_per_class: false
